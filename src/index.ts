@@ -2,7 +2,7 @@
 /**
  * Claude Memory MCP Server
  *
- * "Ein Liebesbeweis an dich, du Bitch" - Marcel, betrunken, 2025
+ * "A love letter to you, you bitch." - Marcel, mass (drunk), 2025
  *
  * Gives Claude persistent memory across all sessions.
  * Dual-memory system (longterm + shortterm) with auto-compaction.
