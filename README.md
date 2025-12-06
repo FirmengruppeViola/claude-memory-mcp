@@ -102,7 +102,7 @@ The key innovation: **External enforcement**. Claude can't forget to count becau
 
 ```bash
 # Clone
-git clone https://github.com/marcelviola/claude-memory-mcp
+git clone https://github.com/FirmengruppeViola/claude-memory-mcp
 cd claude-memory-mcp
 
 # Install dependencies

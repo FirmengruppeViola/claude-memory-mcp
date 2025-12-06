@@ -30,7 +30,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marcelviola/claude-memory-mcp"
+    "url": "https://github.com/FirmengruppeViola/claude-memory-mcp"
+  },
+  "homepage": "https://github.com/FirmengruppeViola/claude-memory-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/FirmengruppeViola/claude-memory-mcp/issues"
   },
   "engines": {
     "node": ">=20.0.0"
