@@ -1,11 +1,11 @@
 {
-  "name": "claude-memory-mcp",
+  "name": "memory-buddy",
   "version": "0.1.0",
-  "description": "MCP server that gives Claude persistent memory across all sessions",
+  "description": "Give your AI a memory. MCP server for persistent context across all sessions.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "claude-memory": "dist/cli.js"
+    "memory-buddy": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -17,12 +17,14 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "claude",
-    "mcp",
     "memory",
+    "buddy",
     "ai",
+    "mcp",
+    "claude",
     "llm",
     "context",
+    "persistent",
     "anthropic",
     "model-context-protocol"
   ],

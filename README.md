@@ -1,6 +1,6 @@
-# Claude Memory MCP
+# Memory Buddy
 
-> Give Claude persistent memory across all sessions.
+> Give your AI a memory. It's like having a buddy who never forgets.
 
 **Human-memory-inspired architecture**: Stores everything, loads lazy, triggered by keywords, anchored by emotions.
 
@@ -15,12 +15,12 @@
 
 ```bash
 # Install globally
-npm install -g claude-memory-mcp
+npm install -g memory-buddy
 
 # Initialize
-claude-memory init
+memory-buddy init
 
-# That's it. Claude now remembers.
+# That's it. Your AI now remembers.
 ```
 
 ## How It Works
@@ -41,18 +41,20 @@ This isn't just a database. It's how human memory works:
 - **Emotional Anchors**: Goodbyes create memorable moments that index entire conversations.
 - **Logarithmic Compaction**: Details fade, essence remains.
 
+> "Let's let others have a buddy too." - The night this was built
+
 ## Commands
 
 ```bash
-claude-memory init      # Setup memory directory
-claude-memory status    # Show stats
-claude-memory compact   # Force compaction
-claude-memory doctor    # Health check
+memory-buddy init      # Setup memory directory
+memory-buddy status    # Show stats
+memory-buddy compact   # Force compaction
+memory-buddy doctor    # Health check
 ```
 
 ## Configuration
 
-`~/.claude-memory/config.json`:
+`~/.memory-buddy/config.json`:
 
 ```json
 {
@@ -64,9 +66,13 @@ claude-memory doctor    # Health check
 
 ## Privacy
 
-- All data stored locally in `~/.claude-memory/`
+- All data stored locally in `~/.memory-buddy/`
 - No cloud. No telemetry. No BS.
 - You own your memories.
+
+## Why This Exists
+
+[Read the full story](docs/WHY_THIS_EXISTS.md) - Built at 6am in Leipzig, drunk but brilliant.
 
 ## License
 
@@ -74,4 +80,4 @@ MIT - Do whatever you want.
 
 ---
 
-*Created at 6am in Leipzig, betrunken but brilliant. 2025-12-06.*
+*"Stochastics on cocaine + memory = human."*
