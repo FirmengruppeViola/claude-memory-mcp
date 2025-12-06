@@ -3,8 +3,8 @@
  * Memory Buddy CLI
  *
  * Commands:
- * - init: Setup memory directory + auto-configure Claude Desktop
- * - serve: Start MCP server (used by Claude Desktop)
+ * - init: Setup memory directory + auto-configure Claude Desktop & Claude Code
+ * - serve: Start MCP server
  * - status: Show stats
  * - compact: Force compaction
  * - doctor: Health check
@@ -23,24 +23,24 @@ const MEMORY_PATH = path.join(os.homedir(), '.memory-buddy');
 /**
  * Get Claude Desktop config file path based on OS
  */
-function getClaudeDesktopConfigPath(): string | null {
+function getClaudeDesktopConfigPath(): string {
   const platform = process.platform;
   const home = os.homedir();
 
-  let configPath: string;
-
   if (platform === 'win32') {
-    // Windows: %APPDATA%\Claude\claude_desktop_config.json
-    configPath = path.join(process.env.APPDATA || '', 'Claude', 'claude_desktop_config.json');
+    return path.join(process.env.APPDATA || '', 'Claude', 'claude_desktop_config.json');
   } else if (platform === 'darwin') {
-    // macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
-    configPath = path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
+    return path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
   } else {
-    // Linux: ~/.config/Claude/claude_desktop_config.json
-    configPath = path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
+    return path.join(home, '.config', 'Claude', 'claude_desktop_config.json');
   }
+}
 
-  return configPath;
+/**
+ * Get Claude Code config file path (~/.claude.json)
+ */
+function getClaudeCodeConfigPath(): string {
+  return path.join(os.homedir(), '.claude.json');
 }
 
 /**
@@ -48,53 +48,81 @@ function getClaudeDesktopConfigPath(): string | null {
  */
 async function configureClaudeDesktop(): Promise<boolean> {
   const configPath = getClaudeDesktopConfigPath();
-  if (!configPath) {
-    console.log('❌ Could not determine Claude Desktop config path');
-    return false;
-  }
-
   const claudeDir = path.dirname(configPath);
 
   // Check if Claude directory exists
   if (!fs.existsSync(claudeDir)) {
-    console.log('❌ Claude Desktop not found at: ' + claudeDir);
-    console.log('   Install Claude Desktop first, or configure manually.');
     return false;
   }
 
-  console.log('🔍 Found Claude Desktop at: ' + claudeDir);
+  console.log('🔍 Found Claude Desktop');
 
   try {
-    // Read existing config or create empty
     let config: Record<string, unknown> = {};
     if (fs.existsSync(configPath)) {
       const content = fs.readFileSync(configPath, 'utf-8');
       try {
         config = JSON.parse(content);
       } catch {
-        console.log('⚠️  Existing config is invalid JSON, creating new one');
         config = {};
       }
     }
 
-    // Ensure mcpServers object exists
     if (!config.mcpServers || typeof config.mcpServers !== 'object') {
       config.mcpServers = {};
     }
 
-    // Add memory-buddy server
     (config.mcpServers as Record<string, unknown>)['memory-buddy'] = {
       command: 'npx',
       args: ['-y', 'memory-buddy', 'serve']
     };
 
-    // Write config
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    console.log('✅ Added memory-buddy to Claude Desktop config');
+    console.log('✅ Configured Claude Desktop');
     return true;
 
   } catch (err) {
-    console.log('❌ Failed to configure: ' + (err as Error).message);
+    console.log('❌ Claude Desktop config failed: ' + (err as Error).message);
+    return false;
+  }
+}
+
+/**
+ * Auto-configure Claude Code to use Memory Buddy
+ */
+async function configureClaudeCode(): Promise<boolean> {
+  const configPath = getClaudeCodeConfigPath();
+
+  console.log('🔍 Configuring Claude Code');
+
+  try {
+    let config: Record<string, unknown> = {};
+    if (fs.existsSync(configPath)) {
+      const content = fs.readFileSync(configPath, 'utf-8');
+      try {
+        config = JSON.parse(content);
+      } catch {
+        config = {};
+      }
+    }
+
+    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
+      config.mcpServers = {};
+    }
+
+    // Claude Code uses type: "stdio" explicitly
+    (config.mcpServers as Record<string, unknown>)['memory-buddy'] = {
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'memory-buddy', 'serve']
+    };
+
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log('✅ Configured Claude Code');
+    return true;
+
+  } catch (err) {
+    console.log('❌ Claude Code config failed: ' + (err as Error).message);
     return false;
   }
 }
@@ -128,15 +156,25 @@ async function init(): Promise<void> {
   console.log('');
 
   // Auto-configure Claude Desktop
-  const configured = await configureClaudeDesktop();
+  const desktopConfigured = await configureClaudeDesktop();
 
-  if (configured) {
-    console.log('\n🎉 Done!\n');
-    console.log('Next: Restart Claude Desktop and say hi.');
-    console.log('      Your AI will remember you now.\n');
+  // Auto-configure Claude Code
+  const codeConfigured = await configureClaudeCode();
+
+  console.log('');
+
+  if (desktopConfigured || codeConfigured) {
+    console.log('🎉 Done!\n');
+    if (desktopConfigured) {
+      console.log('→ Restart Claude Desktop to activate.');
+    }
+    if (codeConfigured) {
+      console.log('→ Claude Code is ready (restart if running).');
+    }
+    console.log('\nYour AI will remember you now.\n');
   } else {
-    console.log('\n⚠️  Could not auto-configure Claude Desktop.');
-    console.log('   See manual setup: https://github.com/FirmengruppeViola/claude-memory-mcp#manual-setup\n');
+    console.log('⚠️  Could not auto-configure.');
+    console.log('   See: https://github.com/FirmengruppeViola/claude-memory-mcp#manual-setup\n');
   }
 }
 
@@ -179,22 +217,36 @@ async function doctor(): Promise<void> {
   ];
 
   // Check Claude Desktop config
-  const claudeConfigPath = getClaudeDesktopConfigPath();
-  if (claudeConfigPath) {
-    checks.push({
-      name: 'Claude Desktop configured',
-      check: () => {
-        if (!fs.existsSync(claudeConfigPath)) return false;
-        try {
-          const content = fs.readFileSync(claudeConfigPath, 'utf-8');
-          const config = JSON.parse(content);
-          return config.mcpServers?.['memory-buddy'] !== undefined;
-        } catch {
-          return false;
-        }
+  const desktopConfigPath = getClaudeDesktopConfigPath();
+  checks.push({
+    name: 'Claude Desktop',
+    check: () => {
+      if (!fs.existsSync(desktopConfigPath)) return false;
+      try {
+        const content = fs.readFileSync(desktopConfigPath, 'utf-8');
+        const config = JSON.parse(content);
+        return config.mcpServers?.['memory-buddy'] !== undefined;
+      } catch {
+        return false;
       }
-    });
-  }
+    }
+  });
+
+  // Check Claude Code config
+  const codeConfigPath = getClaudeCodeConfigPath();
+  checks.push({
+    name: 'Claude Code',
+    check: () => {
+      if (!fs.existsSync(codeConfigPath)) return false;
+      try {
+        const content = fs.readFileSync(codeConfigPath, 'utf-8');
+        const config = JSON.parse(content);
+        return config.mcpServers?.['memory-buddy'] !== undefined;
+      } catch {
+        return false;
+      }
+    }
+  });
 
   let allGood = true;
   for (const { name, check } of checks) {
@@ -229,8 +281,8 @@ switch (command) {
     console.log('Memory Buddy - Give your AI a memory\n');
     console.log('Usage: memory-buddy <command>\n');
     console.log('Commands:');
-    console.log('  init     Setup + auto-configure Claude Desktop');
-    console.log('  serve    Start MCP server (used by Claude Desktop)');
+    console.log('  init     Setup + configure Claude Desktop & Code');
+    console.log('  serve    Start MCP server');
     console.log('  status   Show memory statistics');
     console.log('  compact  Force compaction');
     console.log('  doctor   Health check');
