@@ -1,0 +1,55 @@
+{
+  "name": "claude-memory-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that gives Claude persistent memory across all sessions",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "claude-memory": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude",
+    "mcp",
+    "memory",
+    "ai",
+    "llm",
+    "context",
+    "anthropic",
+    "model-context-protocol"
+  ],
+  "author": "Marcel Viola",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcelviola/claude-memory-mcp"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.24.3",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.1",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}
