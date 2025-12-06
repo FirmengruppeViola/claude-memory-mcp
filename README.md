@@ -52,6 +52,41 @@ memory-buddy init
 
 **Requirements:** Node.js 20+, Claude Desktop / Cursor / any MCP client
 
+`memory-buddy init` automatically configures Claude Desktop. If it works, you're done!
+
+---
+
+## Manual Setup
+
+If auto-config didn't work, configure manually:
+
+### Claude Desktop
+
+Add to your config file:
+
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "memory-buddy": {
+      "command": "npx",
+      "args": ["-y", "memory-buddy", "serve"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. Done.
+
+### Cursor
+
+Settings → MCP → Add Server:
+- **Name:** `memory-buddy`
+- **Command:** `npx -y memory-buddy serve`
+
 ---
 
 ## How It Works
