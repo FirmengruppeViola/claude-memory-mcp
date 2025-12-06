@@ -1,109 +1,126 @@
 /**
- * Compactor
- *
- * Handles compression of shortterm memory into longterm.
- * Filters by importance, compresses, and resets shortterm.
+ * Compactor - Session-based compaction with emotional anchors
+ * 
+ * - Creates emotional anchor on session end
+ * - Compresses session events → summary
+ * - Logarithmic growth (daily → weekly → monthly → yearly)
  */
 
-import { MemoryManager } from './manager.js';
-import { Config } from '../config/schema.js';
-
-interface ParsedInsight {
-  date: string;
-  importance: number;
-  content: string;
-}
+import type { EventStore, MemoryEvent } from './store.js';
+import type { IndexService } from './index.js';
 
 export class Compactor {
-  private memory: MemoryManager;
-  private config: Config;
+  private store: EventStore;
+  private index: IndexService;
+  private currentSessionId: string | null = null;
 
-  constructor(memory: MemoryManager, config: Config) {
-    this.memory = memory;
-    this.config = config;
+  constructor(store: EventStore, index: IndexService) {
+    this.store = store;
+    this.index = index;
   }
 
-  /**
-   * Perform full compaction cycle
-   */
-  async compact(): Promise<void> {
-    // 1. Read shortterm
-    const shortterm = await this.memory.readShortterm();
+  async startSession(): Promise<string> {
+    this.currentSessionId = this.generateSessionId();
+    return this.currentSessionId;
+  }
 
-    // 2. Extract insights section
-    const insights = this.extractInsights(shortterm);
+  async endSession(emotionalTone?: string): Promise<void> {
+    if (!this.currentSessionId) return;
 
-    // 3. Filter by importance threshold
-    const important = insights.filter(
-      (i) => i.importance >= this.config.importanceThreshold
+    const events = await this.store.getEvents(this.currentSessionId);
+    if (events.length === 0) return;
+
+    // Create session summary
+    const summary = this.createSessionSummary(events);
+    
+    // Create emotional anchor
+    const anchor: Omit<MemoryEvent, 'id' | 'timestamp'> = {
+      sessionId: this.currentSessionId,
+      type: 'anchor',
+      content: summary,
+      keywords: this.extractTopKeywords(events),
+      emotionalWeight: this.calculateSessionEmotionalWeight(events),
+    };
+
+    await this.store.appendEvent(anchor);
+    await this.index.updateSessionSummary(
+      this.currentSessionId,
+      summary,
+      emotionalTone
     );
 
-    // 4. Compress if there are insights
-    if (important.length > 0) {
-      const compressed = this.compressInsights(important);
-
-      // 5. Append to longterm
-      await this.memory.appendToLongterm(compressed, 'EVOLUTION');
-    }
-
-    // 6. Reset shortterm (preserves NOW/ACTIVE/NEXT)
-    await this.memory.resetShortterm();
+    this.currentSessionId = null;
   }
 
-  /**
-   * Extract insights from shortterm memory
-   */
-  private extractInsights(shortterm: string): ParsedInsight[] {
-    const insights: ParsedInsight[] = [];
+  async compactCurrentSession(): Promise<void> {
+    await this.endSession();
+  }
 
-    // Pattern: **[2025-01-15]** (8/10): Content here
-    const pattern = /\*\*\[(\d{4}-\d{2}-\d{2})\]\*\*\s*\((\d+)\/10\):\s*(.+)/g;
+  getCurrentSessionId(): string | null {
+    return this.currentSessionId;
+  }
 
-    let match;
-    while ((match = pattern.exec(shortterm)) !== null) {
-      const date = match[1];
-      const importance = match[2];
-      const content = match[3];
+  private createSessionSummary(events: MemoryEvent[]): string {
+    // Get first and last timestamps
+    const first = events[0];
+    const last = events[events.length - 1];
+    
+    // Count by type
+    const userMessages = events.filter(e => e.type === 'user').length;
+    const insights = events.filter(e => e.type === 'insight').length;
+    
+    // Extract high-importance content
+    const importantEvents = events
+      .filter(e => e.emotionalWeight >= 7)
+      .map(e => e.content)
+      .slice(0, 3);
 
-      if (date && importance && content) {
-        insights.push({
-          date,
-          importance: parseInt(importance, 10),
-          content: content.trim(),
-        });
+    // Build summary
+    let summary = 'Session: ' + userMessages + ' messages';
+    if (insights > 0) {
+      summary += ', ' + insights + ' insights';
+    }
+    
+    if (importantEvents.length > 0) {
+      summary += '. Key moments: ' + importantEvents.join('; ');
+    }
+
+    return summary;
+  }
+
+  private extractTopKeywords(events: MemoryEvent[]): string[] {
+    const keywordCounts: Record<string, number> = {};
+
+    for (const event of events) {
+      for (const keyword of event.keywords) {
+        const lower = keyword.toLowerCase();
+        keywordCounts[lower] = (keywordCounts[lower] || 0) + 1;
       }
     }
 
-    return insights;
+    // Sort by count and take top 10
+    return Object.entries(keywordCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([k]) => k);
   }
 
-  /**
-   * Compress insights into summary
-   */
-  private compressInsights(insights: ParsedInsight[]): string {
-    if (insights.length === 0) return '';
+  private calculateSessionEmotionalWeight(events: MemoryEvent[]): number {
+    if (events.length === 0) return 5;
 
-    // Group by date
-    const grouped = new Map<string, ParsedInsight[]>();
-    for (const insight of insights) {
-      const existing = grouped.get(insight.date) || [];
-      existing.push(insight);
-      grouped.set(insight.date, existing);
-    }
+    // Average emotional weight, weighted towards higher values
+    const weights = events.map(e => e.emotionalWeight);
+    const max = Math.max(...weights);
+    const avg = weights.reduce((a, b) => a + b, 0) / weights.length;
+    
+    // Blend: 60% max, 40% average
+    return Math.round(max * 0.6 + avg * 0.4);
+  }
 
-    // Build compressed summary
-    const lines: string[] = [];
-
-    for (const [date, dateInsights] of grouped) {
-      // Combine insights for the date
-      const combined = dateInsights
-        .sort((a, b) => b.importance - a.importance)
-        .map((i) => `- ${i.content} (${i.importance}/10)`)
-        .join('\n');
-
-      lines.push(`**${date}:**\n${combined}`);
-    }
-
-    return lines.join('\n\n');
+  private generateSessionId(): string {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '');
+    return 'session_' + dateStr + '_' + timeStr;
   }
 }

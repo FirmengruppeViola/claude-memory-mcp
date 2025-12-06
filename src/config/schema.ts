@@ -1,7 +1,9 @@
 /**
  * Configuration Schema
- *
- * Defines and validates configuration for the memory system.
+ * 
+ * - Validated with Zod
+ * - Sensible defaults
+ * - User can customize via config file
  */
 
 import { z } from 'zod';
@@ -9,126 +11,61 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// Schema definition
-const ConfigSchema = z.object({
+export const ConfigSchema = z.object({
   version: z.string().default('1.0'),
-  threshold: z.number().min(1).max(100).default(20),
-  importanceThreshold: z.number().min(0).max(10).default(7),
+  
+  // Paths
   memoryPath: z.string().default(path.join(os.homedir(), '.claude-memory')),
-  activeProfile: z.string().default('default'),
-
-  profiles: z
-    .record(
-      z.string(),
-      z.object({
-        longterm: z.string(),
-        shortterm: z.string(),
-        enabled: z.boolean().default(true),
-      })
-    )
-    .default({
-      default: {
-        longterm: 'longterm_memory.md',
-        shortterm: 'shortterm_memory.md',
-        enabled: true,
-      },
-    }),
-
-  compression: z
-    .object({
-      maxShorttermSize: z.number().default(2000),
-      maxLongtermSize: z.number().default(10000),
-      strategy: z.enum(['importance-based', 'time-based']).default('importance-based'),
-    })
-    .default({
-      maxShorttermSize: 2000,
-      maxLongtermSize: 10000,
-      strategy: 'importance-based',
-    }),
-
-  logging: z
-    .object({
-      level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-      file: z.string().optional(),
-    })
-    .default({
-      level: 'info',
-    }),
+  
+  // Context budget
+  maxContextTokens: z.number().min(500).max(10000).default(2500),
+  coreIdentityTokens: z.number().min(100).max(2000).default(500),
+  recentAnchorsTokens: z.number().min(100).max(2000).default(500),
+  triggeredMemoriesTokens: z.number().min(100).max(5000).default(1500),
+  
+  // Session detection
+  sessionTimeoutMinutes: z.number().min(5).max(120).default(30),
+  
+  // Compaction
+  emotionalThreshold: z.number().min(1).max(10).default(7),
+  maxEventsBeforeCompact: z.number().min(10).max(1000).default(100),
+  
+  // Logging
+  logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/**
- * Default configuration
- */
-const DEFAULT_CONFIG: Config = {
-  version: '1.0',
-  threshold: 20,
-  importanceThreshold: 7,
-  memoryPath: path.join(os.homedir(), '.claude-memory'),
-  activeProfile: 'default',
-  profiles: {
-    default: {
-      longterm: 'longterm_memory.md',
-      shortterm: 'shortterm_memory.md',
-      enabled: true,
-    },
-  },
-  compression: {
-    maxShorttermSize: 2000,
-    maxLongtermSize: 10000,
-    strategy: 'importance-based',
-  },
-  logging: {
-    level: 'info',
-  },
-};
-
-/**
- * Get path to config file
- */
-function getConfigPath(): string {
-  return path.join(os.homedir(), '.claude-memory', 'config.json');
-}
-
-/**
- * Load configuration from file or use defaults
- */
 export function loadConfig(): Config {
-  const configPath = getConfigPath();
-
-  try {
-    if (fs.existsSync(configPath)) {
-      const raw = fs.readFileSync(configPath, 'utf-8');
-      const parsed = JSON.parse(raw) as unknown;
-      const validated = ConfigSchema.parse(parsed);
-      return validated;
+  const configPath = path.join(os.homedir(), '.claude-memory', 'config.json');
+  
+  if (fs.existsSync(configPath)) {
+    try {
+      const content = fs.readFileSync(configPath, 'utf-8');
+      const parsed = JSON.parse(content);
+      return ConfigSchema.parse(parsed);
+    } catch (error) {
+      console.error('Invalid config file, using defaults:', error);
     }
-  } catch (error) {
-    console.error('[Memory] Error loading config, using defaults:', error);
   }
-
-  return DEFAULT_CONFIG;
+  
+  return ConfigSchema.parse({});
 }
 
-/**
- * Save configuration to file
- */
-export function saveConfig(config: Config): void {
-  const configPath = getConfigPath();
+export function saveConfig(config: Partial<Config>): void {
+  const configPath = path.join(os.homedir(), '.claude-memory', 'config.json');
   const dir = path.dirname(configPath);
-
-  // Ensure directory exists
+  
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  
+  const existing = loadConfig();
+  const merged = { ...existing, ...config };
+  
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), 'utf-8');
 }
 
-/**
- * Validate configuration
- */
-export function validateConfig(config: unknown): Config {
-  return ConfigSchema.parse(config);
+export function getDefaultConfig(): Config {
+  return ConfigSchema.parse({});
 }

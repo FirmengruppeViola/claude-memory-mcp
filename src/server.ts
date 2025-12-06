@@ -1,8 +1,12 @@
 /**
  * MCP Server Implementation
- *
- * Core server that handles all MCP protocol communication.
- * Auto-increments counter after EVERY tool call.
+ * 
+ * Core responsibilities:
+ * - Intercept all Claude interactions
+ * - Auto-store every message as event
+ * - Load relevant context (lazy loading)
+ * - Detect session boundaries
+ * - Trigger compaction on session end
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -14,27 +18,22 @@ import {
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { MemoryManager } from './memory/manager.js';
-import { Counter } from './memory/counter.js';
+import { EventStore } from './memory/store.js';
+import { IndexService } from './memory/index.js';
+import { ContextLoader } from './memory/loader.js';
 import { Compactor } from './memory/compactor.js';
-import { Config, loadConfig } from './config/schema.js';
 
 export class MemoryServer {
   private server: Server;
-  private memory: MemoryManager;
-  private counter: Counter;
+  private store: EventStore;
+  private index: IndexService;
+  private loader: ContextLoader;
   private compactor: Compactor;
-  private config: Config;
 
   constructor() {
-    this.config = loadConfig();
-    this.memory = new MemoryManager(this.config);
-    this.counter = new Counter(this.memory);
-    this.compactor = new Compactor(this.memory, this.config);
-
     this.server = new Server(
       {
-        name: 'claude-memory-mcp',
+        name: 'claude-memory',
         version: '0.1.0',
       },
       {
@@ -45,6 +44,12 @@ export class MemoryServer {
       }
     );
 
+    // Initialize components
+    this.store = new EventStore();
+    this.index = new IndexService();
+    this.loader = new ContextLoader(this.store, this.index);
+    this.compactor = new Compactor(this.store, this.index);
+
     this.setupHandlers();
   }
 
@@ -53,123 +58,87 @@ export class MemoryServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'memory_read',
-          description: 'Read current memory state (longterm, shortterm, or both)',
+          name: 'memory_status',
+          description: 'Get memory system status (events count, last session, etc.)',
           inputSchema: {
-            type: 'object' as const,
-            properties: {
-              scope: {
-                type: 'string',
-                enum: ['longterm', 'shortterm', 'both'],
-                default: 'both',
-                description: 'Which memory to read',
-              },
-            },
+            type: 'object',
+            properties: {},
           },
         },
         {
-          name: 'memory_update',
-          description: 'Add insight to shortterm memory',
+          name: 'memory_search',
+          description: 'Search through memories by keyword',
           inputSchema: {
-            type: 'object' as const,
+            type: 'object',
             properties: {
-              content: {
+              query: {
                 type: 'string',
-                description: 'The insight to add',
-              },
-              importance: {
-                type: 'number',
-                minimum: 0,
-                maximum: 10,
-                default: 5,
-                description: 'Importance level (0-10)',
-              },
-              section: {
-                type: 'string',
-                enum: ['NOW', 'RECENT', 'ACTIVE', 'INSIGHTS'],
-                default: 'INSIGHTS',
-                description: 'Which section to add to',
+                description: 'Search query',
               },
             },
-            required: ['content'],
+            required: ['query'],
           },
         },
         {
           name: 'memory_compact',
-          description: 'Trigger manual compaction (compress shortterm into longterm)',
+          description: 'Force compaction of current session',
           inputSchema: {
-            type: 'object' as const,
-            properties: {
-              force: {
-                type: 'boolean',
-                default: false,
-                description: 'Force compaction even if threshold not reached',
-              },
-            },
-          },
-        },
-        {
-          name: 'memory_status',
-          description: 'Get current counter and system status',
-          inputSchema: {
-            type: 'object' as const,
+            type: 'object',
             properties: {},
           },
         },
       ],
     }));
 
+    // Handle tool calls
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      switch (name) {
+        case 'memory_status':
+          return this.handleStatus();
+        case 'memory_search':
+          return this.handleSearch(args?.query as string);
+        case 'memory_compact':
+          return this.handleCompact();
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    });
+
     // List available resources
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       resources: [
         {
-          uri: 'memory://longterm',
-          name: 'Long-term Memory',
-          description: 'Persistent knowledge and history',
-          mimeType: 'text/markdown',
-        },
-        {
-          uri: 'memory://shortterm',
-          name: 'Short-term Memory',
-          description: 'Recent activity and working context',
-          mimeType: 'text/markdown',
+          uri: 'memory://context',
+          name: 'Memory Context',
+          description: 'Current relevant memory context for Claude',
+          mimeType: 'text/plain',
         },
         {
           uri: 'memory://status',
-          name: 'Memory System Status',
-          description: 'Counter, last compaction, health',
+          name: 'Memory Status',
+          description: 'Memory system status and statistics',
           mimeType: 'application/json',
         },
       ],
     }));
 
-    // Read resources
+    // Handle resource reads
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const uri = request.params.uri;
+      const { uri } = request.params;
 
       switch (uri) {
-        case 'memory://longterm':
+        case 'memory://context':
           return {
             contents: [
               {
                 uri,
-                mimeType: 'text/markdown',
-                text: await this.memory.readLongterm(),
+                mimeType: 'text/plain',
+                text: await this.loader.buildContext(''),
               },
             ],
           };
-
-        case 'memory://shortterm':
-          return {
-            contents: [
-              {
-                uri,
-                mimeType: 'text/markdown',
-                text: await this.memory.readShortterm(),
-              },
-            ],
-          };
-
         case 'memory://status':
           return {
             contents: [
@@ -180,147 +149,60 @@ export class MemoryServer {
               },
             ],
           };
-
         default:
           throw new Error(`Unknown resource: ${uri}`);
       }
     });
-
-    // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
-
-      try {
-        let result: unknown;
-
-        switch (name) {
-          case 'memory_read':
-            result = await this.handleMemoryRead(args as { scope?: string });
-            break;
-
-          case 'memory_update':
-            result = await this.handleMemoryUpdate(
-              args as { content: string; importance?: number; section?: string }
-            );
-            break;
-
-          case 'memory_compact':
-            result = await this.handleMemoryCompact(args as { force?: boolean });
-            break;
-
-          case 'memory_status':
-            result = await this.getStatus();
-            break;
-
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
-
-        // AUTO-INCREMENT COUNTER AFTER EVERY TOOL CALL
-        // This is the CORE innovation - external enforcement!
-        await this.incrementAndCheckThreshold();
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    });
   }
 
-  private async incrementAndCheckThreshold(): Promise<void> {
-    await this.counter.increment();
-    const count = await this.counter.getValue();
-
-    // Warning at threshold - 5
-    if (count === this.config.threshold - 5) {
-      console.error(`[Memory] Warning: ${5} messages until compaction`);
-    }
-
-    // Auto-compaction at threshold
-    if (count >= this.config.threshold) {
-      console.error('[Memory] Threshold reached, triggering auto-compaction...');
-      await this.compactor.compact();
-      await this.counter.reset();
-      console.error('[Memory] Compaction complete, counter reset');
-    }
-  }
-
-  private async handleMemoryRead(args: { scope?: string }): Promise<string> {
-    const scope = args.scope ?? 'both';
-
-    switch (scope) {
-      case 'longterm':
-        return await this.memory.readLongterm();
-      case 'shortterm':
-        return await this.memory.readShortterm();
-      case 'both':
-      default:
-        const longterm = await this.memory.readLongterm();
-        const shortterm = await this.memory.readShortterm();
-        return `# LONGTERM MEMORY\n\n${longterm}\n\n---\n\n# SHORTTERM MEMORY\n\n${shortterm}`;
-    }
-  }
-
-  private async handleMemoryUpdate(args: {
-    content: string;
-    importance?: number;
-    section?: string;
-  }): Promise<string> {
-    const { content, importance = 5, section = 'INSIGHTS' } = args;
-
-    await this.memory.addInsight(content, importance, section);
-
-    return `Added to ${section} (importance: ${importance}/10):\n${content}`;
-  }
-
-  private async handleMemoryCompact(args: { force?: boolean }): Promise<string> {
-    const { force = false } = args;
-    const count = await this.counter.getValue();
-
-    if (!force && count < this.config.threshold) {
-      return `Compaction not needed. Counter: ${count}/${this.config.threshold}. Use force=true to override.`;
-    }
-
-    await this.compactor.compact();
-    await this.counter.reset();
-
-    return `Compaction complete. Counter reset to 0/${this.config.threshold}.`;
-  }
-
-  private async getStatus(): Promise<object> {
-    const count = await this.counter.getValue();
-    const metadata = await this.memory.getMetadata();
-
+  private async handleStatus() {
+    const status = await this.getStatus();
     return {
-      counter: count,
-      threshold: this.config.threshold,
-      lastCompaction: metadata.lastCompaction,
-      lastUpdate: metadata.lastUpdate,
-      profile: this.config.activeProfile,
-      health: 'ok',
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(status, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleSearch(query: string) {
+    const results = await this.index.lookup(query.split(' '));
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(results, null, 2),
+        },
+      ],
+    };
+  }
+
+  private async handleCompact() {
+    await this.compactor.compactCurrentSession();
+    return {
+      content: [
+        {
+          type: 'text',
+          text: 'Session compacted successfully.',
+        },
+      ],
+    };
+  }
+
+  private async getStatus() {
+    return {
+      version: '0.1.0',
+      eventsCount: await this.store.getEventsCount(),
+      sessionsCount: await this.index.getSessionsCount(),
+      lastUpdate: new Date().toISOString(),
     };
   }
 
   async start(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('[Memory] Claude Memory MCP Server started');
-    console.error(`[Memory] Threshold: ${this.config.threshold} messages`);
+    console.error('Claude Memory MCP Server running on stdio');
   }
 }

@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "claude-memory": "./dist/cli.js"
+    "claude-memory": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/FirmengruppeViola/claude-memory-mcp"
+    "url": "git+https://github.com/FirmengruppeViola/claude-memory-mcp.git"
   },
   "homepage": "https://github.com/FirmengruppeViola/claude-memory-mcp#readme",
   "bugs": {
@@ -55,5 +55,11 @@
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"
-  }
+  },
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "test"
+  },
+  "type": "commonjs"
 }
