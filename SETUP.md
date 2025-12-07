@@ -100,6 +100,50 @@ cat ~/.memory-buddy/index.json
 | `compact` | Session beenden |
 | `serve` | MCP Server starten |
 
+## Semantic Search aktivieren (Optional)
+
+Semantic Search findet Erinnerungen basierend auf **Bedeutung**, nicht nur Keywords.
+
+### 1. API Key besorgen
+
+**Google (empfohlen - kostenlos bis zu Limits):**
+
+1. Gehe zu https://aistudio.google.com/apikey
+2. Erstelle einen API Key
+3. Fertig
+
+**OpenAI (Alternative):**
+
+1. Gehe zu https://platform.openai.com/api-keys
+2. Erstelle einen API Key
+3. Kostet ~$0.0001 pro 1000 Tokens
+
+### 2. Config anpassen
+
+Editiere `~/.memory-buddy/config.json`:
+
+```json
+{
+  "version": "1.0",
+  "maxContextTokens": 2500,
+  "semanticSearch": {
+    "enabled": true,
+    "provider": "google",
+    "apiKey": "DEIN_API_KEY_HIER"
+  }
+}
+```
+
+Fuer OpenAI: `"provider": "openai"`
+
+### 3. Testen
+
+```bash
+npx memory-buddy status
+```
+
+Embeddings werden automatisch beim ersten Abruf generiert und lokal in `~/.memory-buddy/embeddings/` gespeichert.
+
 ## Troubleshooting
 
 **Hooks nicht aktiv?**
