@@ -32,6 +32,13 @@ export const ConfigSchema = z.object({
   
   // Logging
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+
+  // Semantic Search (optional)
+  semanticSearch: z.object({
+    enabled: z.boolean().default(false),
+    provider: z.enum(['google', 'openai', 'none']).default('none'),
+    apiKey: z.string().optional(),
+  }).default({ enabled: false, provider: 'none' }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

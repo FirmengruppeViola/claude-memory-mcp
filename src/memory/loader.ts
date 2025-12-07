@@ -8,6 +8,8 @@
 
 import type { EventStore, MemoryEvent } from './store.js';
 import type { IndexService } from './index.js';
+import { createEmbeddingService, VectorStore, cosineSimilarity, type EmbeddingService } from './embeddings.js';
+import { loadConfig } from '../config/schema.js';
 
 export interface LoaderConfig {
   maxTokens: number;
@@ -27,11 +29,23 @@ export class ContextLoader {
   private store: EventStore;
   private index: IndexService;
   private config: LoaderConfig;
+  private embeddingService: EmbeddingService | null = null;
+  private vectorStore: VectorStore | null = null;
 
   constructor(store: EventStore, index: IndexService, config?: Partial<LoaderConfig>) {
     this.store = store;
     this.index = index;
     this.config = { ...DEFAULT_CONFIG, ...config };
+
+    // Initialize semantic search if enabled
+    const appConfig = loadConfig();
+    if (appConfig.semanticSearch.enabled && appConfig.semanticSearch.apiKey) {
+      this.embeddingService = createEmbeddingService(
+        appConfig.semanticSearch.provider,
+        appConfig.semanticSearch.apiKey
+      );
+      this.vectorStore = new VectorStore();
+    }
   }
 
   async buildContext(currentMessage: string): Promise<string> {
@@ -52,7 +66,7 @@ export class ContextLoader {
     // 3. Triggered memories (if message provided)
     if (currentMessage) {
       const keywords = this.extractKeywords(currentMessage);
-      const memories = await this.loadTriggeredMemories(keywords);
+      const memories = await this.loadTriggeredMemories(keywords, currentMessage);
       if (memories.length > 0) {
         parts.push('## Relevant Memories\n' + memories.join('\n\n'));
       }
@@ -83,23 +97,33 @@ export class ContextLoader {
     return summaries;
   }
 
-  private async loadTriggeredMemories(keywords: string[]): Promise<string[]> {
-    if (keywords.length === 0) return [];
-
-    const eventIds = await this.index.lookup(keywords);
+  private async loadTriggeredMemories(keywords: string[], originalMessage?: string): Promise<string[]> {
     const events = await this.store.getEvents();
-    
+    if (events.length === 0) return [];
+
+    let candidateIds: Set<string>;
+
+    // Use semantic search if available, otherwise fall back to keywords
+    if (this.embeddingService && this.vectorStore && originalMessage) {
+      candidateIds = await this.getSemanticCandidates(originalMessage, events);
+    } else if (keywords.length > 0) {
+      const keywordIds = await this.index.lookup(keywords);
+      candidateIds = new Set(keywordIds);
+    } else {
+      return [];
+    }
+
     // Find matching events
-    const matches = events.filter(e => eventIds.includes(e.id));
-    
+    const matches = events.filter(e => candidateIds.has(e.id));
+
     // Score and sort
     const scored = matches.map(e => ({
       event: e,
       score: this.calculateScore(e, keywords),
     }));
-    
+
     scored.sort((a, b) => b.score - a.score);
-    
+
     // Take top events within budget
     const result: string[] = [];
     let tokenCount = 0;
@@ -117,6 +141,41 @@ export class ContextLoader {
     }
 
     return result;
+  }
+
+  /**
+   * Get candidate events using semantic similarity
+   */
+  private async getSemanticCandidates(query: string, events: MemoryEvent[]): Promise<Set<string>> {
+    if (!this.embeddingService || !this.vectorStore) {
+      return new Set();
+    }
+
+    try {
+      // Ensure all events have embeddings
+      for (const event of events) {
+        if (!(await this.vectorStore.has(event.id))) {
+          const vector = await this.embeddingService.embed(event.content);
+          await this.vectorStore.store(event.id, vector);
+        }
+      }
+
+      // Embed the query
+      const queryVector = await this.embeddingService.embed(query);
+
+      // Find similar events
+      const similar = await this.vectorStore.findSimilar(queryVector, 20);
+
+      // Filter by similarity threshold (0.5 = moderately similar)
+      const candidates = similar
+        .filter(s => s.similarity > 0.5)
+        .map(s => s.eventId);
+
+      return new Set(candidates);
+    } catch (err) {
+      console.error('Semantic search failed, falling back to keywords:', err);
+      return new Set();
+    }
   }
 
   private calculateScore(event: MemoryEvent, keywords: string[]): number {
