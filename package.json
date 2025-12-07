@@ -1,6 +1,6 @@
 {
   "name": "memory-buddy",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Give your AI a memory. MCP server for persistent context across all sessions.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
