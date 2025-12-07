@@ -18,7 +18,9 @@ import { loadConfig, getDefaultConfig } from './config/schema.js';
 import { EventStore } from './memory/store.js';
 import { IndexService } from './memory/index.js';
 import { MemoryServer } from './server.js';
+import { Compactor } from './memory/compactor.js';
 import { extractKeywords } from './triggers/keywords.js';
+import { calculateImportance, shouldStore } from './triggers/importance.js';
 
 const MEMORY_PATH = path.join(os.homedir(), '.memory-buddy');
 const SESSION_FILE = path.join(MEMORY_PATH, 'current-session.txt');
@@ -276,13 +278,15 @@ async function init(): Promise<void> {
 }
 
 async function store(type: string, content: string): Promise<void> {
-  if (!content) {
+  // Skip empty or trivial messages
+  if (!content || !shouldStore(content)) {
     return;
   }
 
   const eventType = type === 'assistant' ? 'assistant' : 'user';
   const sessionId = getSessionId();
   const keywords = extractKeywords(content);
+  const { score: importanceScore } = calculateImportance(content);
 
   const storeInstance = new EventStore(path.join(MEMORY_PATH, 'events'));
   const index = new IndexService(MEMORY_PATH);
@@ -293,7 +297,7 @@ async function store(type: string, content: string): Promise<void> {
       type: eventType,
       content,
       keywords,
-      emotionalWeight: 5
+      emotionalWeight: importanceScore  // Dynamic scoring instead of fixed 5
     });
 
     await index.addToIndex(event);
@@ -325,12 +329,23 @@ async function status(): Promise<void> {
 }
 
 async function compact(): Promise<void> {
+  // End current session
   try {
     if (fs.existsSync(SESSION_FILE)) {
       fs.unlinkSync(SESSION_FILE);
     }
   } catch {
     // Ignore
+  }
+
+  // Compact old sessions (>24h)
+  const storeInstance = new EventStore(path.join(MEMORY_PATH, 'events'));
+  const index = new IndexService(MEMORY_PATH);
+  const compactor = new Compactor(storeInstance, index, MEMORY_PATH);
+
+  const count = await compactor.compactOldSessions(24);
+  if (count > 0) {
+    console.log(`Compacted ${count} old session(s)`);
   }
 }
 

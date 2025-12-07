@@ -108,34 +108,32 @@ export class ContextLoader {
     for (const { event } of scored) {
       const eventTokens = this.estimateTokens(event.content);
       if (tokenCount + eventTokens > maxTokens) break;
-      
+
       result.push(this.formatEvent(event));
       tokenCount += eventTokens;
+
+      // Record access (prevents decay, boosts future relevance)
+      await this.index.recordAccess(event.id);
     }
 
     return result;
   }
 
   private calculateScore(event: MemoryEvent, keywords: string[]): number {
-    let score = 0;
+    // Use decay-adjusted score from index (includes access boost)
+    const effectiveScore = this.index.calculateEffectiveScore(event.id);
 
-    // Recency (0.3)
-    const age = Date.now() - new Date(event.timestamp).getTime();
-    const dayInMs = 24 * 60 * 60 * 1000;
-    const recencyScore = Math.max(0, 1 - age / (30 * dayInMs)); // Decay over 30 days
-    score += recencyScore * 0.3;
+    // Normalize to 0-1 range (effectiveScore can be > 10 with access boost)
+    const normalizedEffective = Math.min(effectiveScore, 15) / 15;
 
-    // Emotional weight (0.4)
-    score += (event.emotionalWeight / 10) * 0.4;
-
-    // Keyword match (0.3)
-    const matchCount = keywords.filter(k => 
+    // Keyword match bonus (0-0.3)
+    const matchCount = keywords.filter(k =>
       event.keywords.some(ek => ek.toLowerCase().includes(k.toLowerCase()))
     ).length;
-    const keywordScore = matchCount / Math.max(keywords.length, 1);
-    score += keywordScore * 0.3;
+    const keywordScore = (matchCount / Math.max(keywords.length, 1)) * 0.3;
 
-    return score;
+    // Combined: 70% decay-adjusted importance, 30% keyword relevance
+    return normalizedEffective * 0.7 + keywordScore;
   }
 
   private extractKeywords(text: string): string[] {

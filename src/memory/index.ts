@@ -20,10 +20,19 @@ export interface SessionMeta {
   eventCount: number;
 }
 
+export interface EventMeta {
+  id: string;
+  baseScore: number;
+  createdAt: string;
+  accessCount: number;
+  lastAccessed?: string;
+}
+
 export interface MemoryIndex {
   keywords: Record<string, string[]>;  // keyword → eventIds
   sessions: Record<string, SessionMeta>;
   anchors: string[];  // emotional anchor eventIds
+  eventMeta: Record<string, EventMeta>;  // eventId → meta (for decay)
   lastUpdate: string;
 }
 
@@ -46,6 +55,7 @@ export class IndexService {
       keywords: {},
       sessions: {},
       anchors: [],
+      eventMeta: {},
       lastUpdate: new Date().toISOString(),
     };
   }
@@ -87,6 +97,14 @@ export class IndexService {
       this.index.anchors.push(event.id);
     }
 
+    // Track event meta for decay calculation
+    this.index.eventMeta[event.id] = {
+      id: event.id,
+      baseScore: event.emotionalWeight,
+      createdAt: event.timestamp,
+      accessCount: 0
+    };
+
     this.saveIndex();
   }
 
@@ -123,5 +141,50 @@ export class IndexService {
       }
       this.saveIndex();
     }
+  }
+
+  /**
+   * Calculate effective score with decay
+   * Formula: baseScore * decayFactor * accessBoost
+   *
+   * decayFactor = e^(-age_days / half_life)
+   * accessBoost = 1 + (0.2 * accessCount)
+   */
+  calculateEffectiveScore(eventId: string, halfLifeDays: number = 30): number {
+    const meta = this.index.eventMeta[eventId];
+    if (!meta) return 5; // Default score if not tracked
+
+    const ageMs = Date.now() - new Date(meta.createdAt).getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+
+    const decayFactor = Math.exp(-ageDays / halfLifeDays);
+    const accessBoost = 1 + (0.2 * meta.accessCount);
+
+    return meta.baseScore * decayFactor * accessBoost;
+  }
+
+  /**
+   * Record that an event was accessed (prevents decay)
+   */
+  async recordAccess(eventId: string): Promise<void> {
+    if (this.index.eventMeta[eventId]) {
+      this.index.eventMeta[eventId].accessCount++;
+      this.index.eventMeta[eventId].lastAccessed = new Date().toISOString();
+      this.saveIndex();
+    }
+  }
+
+  /**
+   * Get event meta
+   */
+  getEventMeta(eventId: string): EventMeta | undefined {
+    return this.index.eventMeta[eventId];
+  }
+
+  /**
+   * Get all event metas
+   */
+  getAllEventMeta(): Record<string, EventMeta> {
+    return this.index.eventMeta;
   }
 }
